@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Real brand assets - provided separately, never commit real logos/base image
+assets/base/*
+!assets/base/.gitkeep
+assets/logos/*
+!assets/logos/.gitkeep
+
+# Generated output
+output/*
+!output/.gitkeep
+calibration_grid.png
+
+# Env / secrets
+.env
+.env.local
+
+# Vercel
+.vercel
+
+# OS
+.DS_Store
+Thumbs.db

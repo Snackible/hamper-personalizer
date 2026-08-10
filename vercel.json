@@ -1,0 +1,11 @@
+{
+  "builds": [
+    { "src": "hamper_api.py", "use": "@vercel/python" }
+  ],
+  "routes": [
+    { "src": "/(.*)", "dest": "hamper_api.py" }
+  ],
+  "crons": [
+    { "path": "/cron/batch-process", "schedule": "0 6 * * *" }
+  ]
+}
