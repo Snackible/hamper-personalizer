@@ -1,10 +1,11 @@
 """
 Core batch engine: pastes each company's logo into a fixed box on the base
-hamper image.
+hamper image, recolored to match Snackible's gold foil branding (each
+company's own font/shape is preserved - only the color changes).
 
 Usage:
     python hamper_personalizer.py \
-        --base assets/base/hamper_base.png \
+        --base assets/base/hamper_base_clean.jpg \
         --logos assets/logos \
         --csv companies.csv \
         --output output \
@@ -64,6 +65,40 @@ def trim_whitespace(logo: Image.Image) -> Image.Image:
     return rgba.crop(bbox)
 
 
+def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    h = hex_color.lstrip("#")
+    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+
+
+def recolor_to_gold(logo: Image.Image, highlight_hex: str, shadow_hex: str) -> Image.Image:
+    """Recolor `logo` to a vertical gold-foil gradient (highlight at top,
+    shadow at bottom), preserving its shape/font via its alpha mask - or, for
+    flattened logos with no transparency, via a mask of its non-white ink."""
+    rgba = logo.convert("RGBA")
+    alpha = rgba.getchannel("A")
+
+    if alpha.getextrema() == (255, 255):
+        gray = rgba.convert("L")
+        mask = gray.point(lambda p: 255 if p < 245 else 0)
+    else:
+        mask = alpha
+
+    width, height = rgba.size
+    highlight = hex_to_rgb(highlight_hex)
+    shadow = hex_to_rgb(shadow_hex)
+
+    gradient_column = Image.new("RGB", (1, height))
+    for y in range(height):
+        t = y / max(height - 1, 1)
+        pixel = tuple(round(highlight[i] + (shadow[i] - highlight[i]) * t) for i in range(3))
+        gradient_column.putpixel((0, y), pixel)
+    gradient = gradient_column.resize((width, height))
+
+    gold = gradient.convert("RGBA")
+    gold.putalpha(mask)
+    return gold
+
+
 def fit_and_center(logo: Image.Image, box_w: int, box_h: int, padding: int) -> Image.Image:
     """Resize `logo` to fit within (box_w, box_h) minus padding, preserving
     aspect ratio, then place it centered on a transparent box_w x box_h canvas."""
@@ -80,12 +115,14 @@ def fit_and_center(logo: Image.Image, box_w: int, box_h: int, padding: int) -> I
     return canvas
 
 
-def build_personalized_image(base_image_path: Path, logo_path: Path, box: dict, padding: int) -> Image.Image:
+def build_personalized_image(base_image_path: Path, logo_path: Path, box: dict, padding: int,
+                              gold_highlight: str, gold_shadow: str) -> Image.Image:
     base = Image.open(base_image_path).convert("RGBA")
     logo = Image.open(logo_path)
 
     trimmed = trim_whitespace(logo)
-    fitted = fit_and_center(trimmed, box["width"], box["height"], padding)
+    gold = recolor_to_gold(trimmed, gold_highlight, gold_shadow)
+    fitted = fit_and_center(gold, box["width"], box["height"], padding)
 
     result = base.copy()
     result.paste(fitted, (box["x"], box["y"]), fitted)
@@ -94,7 +131,7 @@ def build_personalized_image(base_image_path: Path, logo_path: Path, box: dict, 
 
 def process_row(args: tuple) -> JobResult:
     (company_name, logo_filename, base_image_path, logos_dir,
-     output_dir, box, padding) = args
+     output_dir, box, padding, gold_highlight, gold_shadow) = args
 
     logo_path = Path(logos_dir) / logo_filename
     if not logo_path.exists():
@@ -102,7 +139,8 @@ def process_row(args: tuple) -> JobResult:
                           error=f"logo file not found: {logo_path}")
 
     try:
-        result_image = build_personalized_image(Path(base_image_path), logo_path, box, padding)
+        result_image = build_personalized_image(Path(base_image_path), logo_path, box, padding,
+                                                  gold_highlight, gold_shadow)
         output_path = Path(output_dir) / f"{sanitize_filename(company_name)}.png"
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -129,7 +167,9 @@ def read_companies(csv_path: Path) -> list[tuple[str, str]]:
 
 
 def run_batch(base_image_path: Path, logos_dir: Path, csv_path: Path,
-              output_dir: Path, box: dict, padding: int, workers: int) -> list[JobResult]:
+              output_dir: Path, box: dict, padding: int, workers: int,
+              gold_highlight: str = config.GOLD_HIGHLIGHT,
+              gold_shadow: str = config.GOLD_SHADOW) -> list[JobResult]:
     if not base_image_path.exists():
         raise FileNotFoundError(f"base image not found: {base_image_path}")
     if not csv_path.exists():
@@ -140,7 +180,7 @@ def run_batch(base_image_path: Path, logos_dir: Path, csv_path: Path,
 
     job_args = [
         (company_name, logo_filename, str(base_image_path), str(logos_dir),
-         str(output_dir), box, padding)
+         str(output_dir), box, padding, gold_highlight, gold_shadow)
         for company_name, logo_filename in rows
     ]
 

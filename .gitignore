@@ -14,6 +14,10 @@ assets/logos/*
 output/*
 !output/.gitkeep
 calibration_grid.png
+calibration_*.png
+mockup_*.png
+*_zoom.png
+gold_color_check.png
 
 # Env / secrets
 .env

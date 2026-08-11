@@ -1,10 +1,11 @@
 """
 Central configuration for the hamper personalizer pipeline.
 
-IMPORTANT: LOGO_BOX below is a PLACEHOLDER. Run `calibrate_logo_position.py`
-against the real base hamper image to find the actual x/y/width/height of the
-logo slot, then replace the values (or set the matching env vars) before
-running a real batch.
+LOGO_BOX and GOLD_* were calibrated against assets/base/hamper_base_clean.jpg
+(the wordmark-erased base image) on 2026-08-11: box wraps where "Snackible"
+used to sit inside the ornate circular frame, gold values sampled from the
+original branded photo (assets/base/hamper_base.jpg). Re-run
+calibrate_logo_position.py if the base image changes.
 """
 import os
 from pathlib import Path
@@ -12,26 +13,35 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 # --- Paths -------------------------------------------------------------
-# Drop the real base hamper image and real company logos into these folders
-# once you have them. They are gitignored so real brand assets never get
-# committed by accident.
-BASE_IMAGE_PATH = Path(os.environ.get("BASE_IMAGE_PATH", BASE_DIR / "assets" / "base" / "hamper_base.png"))
+# assets/base/hamper_base.jpg       = original photo, Snackible branding intact
+#                                      (kept only as a reference for the gold tone)
+# assets/base/hamper_base_clean.jpg = same photo with the wordmark erased -
+#                                      this is the actual compositing base
+BASE_IMAGE_PATH = Path(os.environ.get("BASE_IMAGE_PATH", BASE_DIR / "assets" / "base" / "hamper_base_clean.jpg"))
 LOGOS_DIR = Path(os.environ.get("LOGOS_DIR", BASE_DIR / "assets" / "logos"))
 COMPANIES_CSV = Path(os.environ.get("COMPANIES_CSV", BASE_DIR / "companies.csv"))
 OUTPUT_DIR = Path(os.environ.get("OUTPUT_DIR", BASE_DIR / "output"))
 
 # --- Logo placement box --------------------------------------------------
-# PLACEHOLDER COORDINATES - DO NOT USE IN PRODUCTION.
-# Replace after running calibrate_logo_position.py, either here or via env
-# vars (LOGO_BOX_X / LOGO_BOX_Y / LOGO_BOX_WIDTH / LOGO_BOX_HEIGHT) so the
-# real coordinates can be supplied at deploy time without editing code.
+# Calibrated against the 1600x1600 base image - wraps the former "Snackible"
+# wordmark + its flourish tail, inside the circular frame, clear of the
+# tagline and the peacock feather decorations. Override via env vars if the
+# base image ever changes.
 LOGO_BOX = {
-    "x": int(os.environ.get("LOGO_BOX_X", 0)),  # PLACEHOLDER
-    "y": int(os.environ.get("LOGO_BOX_Y", 0)),  # PLACEHOLDER
-    "width": int(os.environ.get("LOGO_BOX_WIDTH", 200)),  # PLACEHOLDER
-    "height": int(os.environ.get("LOGO_BOX_HEIGHT", 200)),  # PLACEHOLDER
+    "x": int(os.environ.get("LOGO_BOX_X", 958)),
+    "y": int(os.environ.get("LOGO_BOX_Y", 740)),
+    "width": int(os.environ.get("LOGO_BOX_WIDTH", 165)),
+    "height": int(os.environ.get("LOGO_BOX_HEIGHT", 54)),
 }
 
 # Padding (px) kept between the trimmed logo and the edges of LOGO_BOX when
 # centering, so logos don't touch the box boundary.
-LOGO_PADDING = int(os.environ.get("LOGO_PADDING", 8))
+LOGO_PADDING = int(os.environ.get("LOGO_PADDING", 4))
+
+# --- Gold foil recolor ---------------------------------------------------
+# Each company's logo is recolored to this gold gradient (its own
+# font/shape is preserved, only color changes) so it matches Snackible's
+# foil branding. Sampled from the real "Snackible" wordmark: brightest 5%
+# of gold pixels -> GOLD_HIGHLIGHT, darkest 5% -> GOLD_SHADOW.
+GOLD_HIGHLIGHT = os.environ.get("GOLD_HIGHLIGHT", "#ECAA7C")
+GOLD_SHADOW = os.environ.get("GOLD_SHADOW", "#884B1E")
