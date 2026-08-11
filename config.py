@@ -38,6 +38,12 @@ LOGO_BOX = {
 # centering, so logos don't touch the box boundary.
 LOGO_PADDING = int(os.environ.get("LOGO_PADDING", 4))
 
+# The box lid is photographed at a slight angle - measured by fitting a line
+# across the lid's top edge (positive = clockwise, right edge sits lower
+# than left edge in the photo). The composited logo is rotated by this much
+# so it sits flush with the lid instead of looking pasted-on flat.
+LOGO_ROTATION_DEGREES = float(os.environ.get("LOGO_ROTATION_DEGREES", 2.16))
+
 # --- Gold foil recolor ---------------------------------------------------
 # Each company's logo is recolored to this gold gradient (its own
 # font/shape is preserved, only color changes) so it matches Snackible's

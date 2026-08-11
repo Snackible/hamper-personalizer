@@ -99,14 +99,21 @@ def recolor_to_gold(logo: Image.Image, highlight_hex: str, shadow_hex: str) -> I
     return gold
 
 
-def fit_and_center(logo: Image.Image, box_w: int, box_h: int, padding: int) -> Image.Image:
+def fit_and_center(logo: Image.Image, box_w: int, box_h: int, padding: int,
+                    rotation_degrees: float = 0.0) -> Image.Image:
     """Resize `logo` to fit within (box_w, box_h) minus padding, preserving
-    aspect ratio, then place it centered on a transparent box_w x box_h canvas."""
+    aspect ratio, rotate to match the box's natural tilt, then place it
+    centered on a transparent box_w x box_h canvas."""
     target_w = max(box_w - 2 * padding, 1)
     target_h = max(box_h - 2 * padding, 1)
 
     resized = logo.copy()
     resized.thumbnail((target_w, target_h), Image.LANCZOS)
+
+    if rotation_degrees:
+        # PIL rotates counter-clockwise for positive angles; our convention
+        # is positive = clockwise (matching the measured box tilt), so negate.
+        resized = resized.rotate(-rotation_degrees, expand=True, resample=Image.BICUBIC)
 
     canvas = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
     offset_x = (box_w - resized.width) // 2
@@ -116,13 +123,13 @@ def fit_and_center(logo: Image.Image, box_w: int, box_h: int, padding: int) -> I
 
 
 def build_personalized_image(base_image_path: Path, logo_path: Path, box: dict, padding: int,
-                              gold_highlight: str, gold_shadow: str) -> Image.Image:
+                              gold_highlight: str, gold_shadow: str, rotation_degrees: float) -> Image.Image:
     base = Image.open(base_image_path).convert("RGBA")
     logo = Image.open(logo_path)
 
     trimmed = trim_whitespace(logo)
     gold = recolor_to_gold(trimmed, gold_highlight, gold_shadow)
-    fitted = fit_and_center(gold, box["width"], box["height"], padding)
+    fitted = fit_and_center(gold, box["width"], box["height"], padding, rotation_degrees)
 
     result = base.copy()
     result.paste(fitted, (box["x"], box["y"]), fitted)
@@ -131,7 +138,7 @@ def build_personalized_image(base_image_path: Path, logo_path: Path, box: dict, 
 
 def process_row(args: tuple) -> JobResult:
     (company_name, logo_filename, base_image_path, logos_dir,
-     output_dir, box, padding, gold_highlight, gold_shadow) = args
+     output_dir, box, padding, gold_highlight, gold_shadow, rotation_degrees) = args
 
     logo_path = Path(logos_dir) / logo_filename
     if not logo_path.exists():
@@ -140,7 +147,7 @@ def process_row(args: tuple) -> JobResult:
 
     try:
         result_image = build_personalized_image(Path(base_image_path), logo_path, box, padding,
-                                                  gold_highlight, gold_shadow)
+                                                  gold_highlight, gold_shadow, rotation_degrees)
         output_path = Path(output_dir) / f"{sanitize_filename(company_name)}.png"
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -169,7 +176,8 @@ def read_companies(csv_path: Path) -> list[tuple[str, str]]:
 def run_batch(base_image_path: Path, logos_dir: Path, csv_path: Path,
               output_dir: Path, box: dict, padding: int, workers: int,
               gold_highlight: str = config.GOLD_HIGHLIGHT,
-              gold_shadow: str = config.GOLD_SHADOW) -> list[JobResult]:
+              gold_shadow: str = config.GOLD_SHADOW,
+              rotation_degrees: float = config.LOGO_ROTATION_DEGREES) -> list[JobResult]:
     if not base_image_path.exists():
         raise FileNotFoundError(f"base image not found: {base_image_path}")
     if not csv_path.exists():
@@ -180,7 +188,7 @@ def run_batch(base_image_path: Path, logos_dir: Path, csv_path: Path,
 
     job_args = [
         (company_name, logo_filename, str(base_image_path), str(logos_dir),
-         str(output_dir), box, padding, gold_highlight, gold_shadow)
+         str(output_dir), box, padding, gold_highlight, gold_shadow, rotation_degrees)
         for company_name, logo_filename in rows
     ]
 
