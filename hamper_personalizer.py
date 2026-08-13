@@ -1,11 +1,10 @@
 """
-Core batch engine: pastes each company's logo into a fixed box on the base
-hamper image, recolored to match Snackible's gold foil branding (each
-company's own font/shape is preserved - only the color changes).
+Core batch engine: pastes each company's logo, as-is, into a fixed box on
+the base hamper image.
 
 Usage:
     python hamper_personalizer.py \
-        --base assets/base/hamper_base_clean.jpg \
+        --base assets/base/hamper_base_v2.png \
         --logos assets/logos \
         --csv companies.csv \
         --output output \
@@ -45,7 +44,8 @@ def sanitize_filename(company_name: str) -> str:
 
 
 def trim_whitespace(logo: Image.Image) -> Image.Image:
-    """Crop a logo down to its non-transparent / non-white content."""
+    """Crop a logo down to its non-transparent / non-white content, and make
+    sure the result is actually transparent outside that content."""
     rgba = logo.convert("RGBA")
     alpha = rgba.getchannel("A")
 
@@ -53,50 +53,18 @@ def trim_whitespace(logo: Image.Image) -> Image.Image:
         # Has real transparency - trim to the alpha bounding box.
         bbox = alpha.getbbox()
     else:
-        # Fully opaque (e.g. flattened PNG/JPEG on white) - trim by treating
-        # near-white pixels as background.
+        # Fully opaque (e.g. flattened PNG/JPEG on white) - there's no real
+        # alpha to crop to, so derive one from near-white pixels and apply
+        # it, otherwise the white background stays opaque and shows up as a
+        # solid block once pasted onto the base image.
         gray = rgba.convert("L")
-        bg = Image.new("L", gray.size, 255)
-        diff = Image.eval(gray, lambda p: 255 if p < 250 else 0)
-        bbox = diff.getbbox()
+        mask = Image.eval(gray, lambda p: 255 if p < 250 else 0)
+        rgba.putalpha(mask)
+        bbox = mask.getbbox()
 
     if bbox is None:
         return rgba
     return rgba.crop(bbox)
-
-
-def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
-    h = hex_color.lstrip("#")
-    return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-
-
-def recolor_to_gold(logo: Image.Image, highlight_hex: str, shadow_hex: str) -> Image.Image:
-    """Recolor `logo` to a vertical gold-foil gradient (highlight at top,
-    shadow at bottom), preserving its shape/font via its alpha mask - or, for
-    flattened logos with no transparency, via a mask of its non-white ink."""
-    rgba = logo.convert("RGBA")
-    alpha = rgba.getchannel("A")
-
-    if alpha.getextrema() == (255, 255):
-        gray = rgba.convert("L")
-        mask = gray.point(lambda p: 255 if p < 245 else 0)
-    else:
-        mask = alpha
-
-    width, height = rgba.size
-    highlight = hex_to_rgb(highlight_hex)
-    shadow = hex_to_rgb(shadow_hex)
-
-    gradient_column = Image.new("RGB", (1, height))
-    for y in range(height):
-        t = y / max(height - 1, 1)
-        pixel = tuple(round(highlight[i] + (shadow[i] - highlight[i]) * t) for i in range(3))
-        gradient_column.putpixel((0, y), pixel)
-    gradient = gradient_column.resize((width, height))
-
-    gold = gradient.convert("RGBA")
-    gold.putalpha(mask)
-    return gold
 
 
 def fit_and_center(logo: Image.Image, box_w: int, box_h: int, padding: int,
@@ -114,22 +82,49 @@ def fit_and_center(logo: Image.Image, box_w: int, box_h: int, padding: int,
         # PIL rotates counter-clockwise for positive angles; our convention
         # is positive = clockwise (matching the measured box tilt), so negate.
         resized = resized.rotate(-rotation_degrees, expand=True, resample=Image.BICUBIC)
+        # rotating with expand=True can grow the bounding box past the
+        # padded target - shrink back down so the result never spills past
+        # the intended margin (and thus never crowds the decorative border).
+        if resized.width > target_w or resized.height > target_h:
+            resized.thumbnail((target_w, target_h), Image.LANCZOS)
 
     canvas = Image.new("RGBA", (box_w, box_h), (0, 0, 0, 0))
-    offset_x = (box_w - resized.width) // 2
-    offset_y = (box_h - resized.height) // 2
+    # Center by visual weight (alpha-weighted centroid), not bounding box -
+    # a bold letter (e.g. "D") reads heavier than a thin trailing mark (e.g.
+    # a period), so bounding-box centering alone can still look off-center.
+    centroid_x, centroid_y = alpha_centroid(resized)
+    offset_x = round(box_w / 2 - centroid_x)
+    offset_y = round(box_h / 2 - centroid_y)
     canvas.paste(resized, (offset_x, offset_y), resized)
     return canvas
 
 
+def alpha_centroid(img: Image.Image) -> tuple[float, float]:
+    """Alpha-weighted centroid of `img`, falling back to its geometric
+    center if fully transparent."""
+    alpha = img.getchannel("A")
+    w, h = alpha.size
+    data = alpha.load()
+    total = sx = sy = 0
+    for y in range(h):
+        for x in range(w):
+            a = data[x, y]
+            if a:
+                total += a
+                sx += x * a
+                sy += y * a
+    if total == 0:
+        return w / 2, h / 2
+    return sx / total, sy / total
+
+
 def build_personalized_image(base_image_path: Path, logo_path: Path, box: dict, padding: int,
-                              gold_highlight: str, gold_shadow: str, rotation_degrees: float) -> Image.Image:
+                              rotation_degrees: float) -> Image.Image:
     base = Image.open(base_image_path).convert("RGBA")
     logo = Image.open(logo_path)
 
     trimmed = trim_whitespace(logo)
-    gold = recolor_to_gold(trimmed, gold_highlight, gold_shadow)
-    fitted = fit_and_center(gold, box["width"], box["height"], padding, rotation_degrees)
+    fitted = fit_and_center(trimmed, box["width"], box["height"], padding, rotation_degrees)
 
     result = base.copy()
     result.paste(fitted, (box["x"], box["y"]), fitted)
@@ -138,7 +133,7 @@ def build_personalized_image(base_image_path: Path, logo_path: Path, box: dict, 
 
 def process_row(args: tuple) -> JobResult:
     (company_name, logo_filename, base_image_path, logos_dir,
-     output_dir, box, padding, gold_highlight, gold_shadow, rotation_degrees) = args
+     output_dir, box, padding, rotation_degrees) = args
 
     logo_path = Path(logos_dir) / logo_filename
     if not logo_path.exists():
@@ -147,7 +142,7 @@ def process_row(args: tuple) -> JobResult:
 
     try:
         result_image = build_personalized_image(Path(base_image_path), logo_path, box, padding,
-                                                  gold_highlight, gold_shadow, rotation_degrees)
+                                                  rotation_degrees)
         output_path = Path(output_dir) / f"{sanitize_filename(company_name)}.png"
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -175,8 +170,6 @@ def read_companies(csv_path: Path) -> list[tuple[str, str]]:
 
 def run_batch(base_image_path: Path, logos_dir: Path, csv_path: Path,
               output_dir: Path, box: dict, padding: int, workers: int,
-              gold_highlight: str = config.GOLD_HIGHLIGHT,
-              gold_shadow: str = config.GOLD_SHADOW,
               rotation_degrees: float = config.LOGO_ROTATION_DEGREES) -> list[JobResult]:
     if not base_image_path.exists():
         raise FileNotFoundError(f"base image not found: {base_image_path}")
@@ -188,7 +181,7 @@ def run_batch(base_image_path: Path, logos_dir: Path, csv_path: Path,
 
     job_args = [
         (company_name, logo_filename, str(base_image_path), str(logos_dir),
-         str(output_dir), box, padding, gold_highlight, gold_shadow, rotation_degrees)
+         str(output_dir), box, padding, rotation_degrees)
         for company_name, logo_filename in rows
     ]
 
