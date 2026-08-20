@@ -44,10 +44,25 @@ USER_AGENT = "hamper-personalizer-logo-fetch/1.0 (internal tool)"
 HEADERS = {"User-Agent": USER_AGENT}
 
 
+def get_with_retry(url: str, params: Optional[dict] = None, timeout: int = 10,
+                    max_retries: int = 3) -> requests.Response:
+    """requests.get with automatic backoff+retry on 429 (rate limit)
+    responses - Wikimedia's APIs will 429 a burst of requests, which
+    otherwise looks identical to "not found" if not handled explicitly."""
+    resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+    for attempt in range(max_retries):
+        if resp.status_code != 429:
+            return resp
+        wait_seconds = min(int(resp.headers.get("Retry-After", 5)), 30)
+        print(f"    (rate limited, waiting {wait_seconds}s...)")
+        time.sleep(wait_seconds)
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+    return resp
+
+
 def fetch_clearbit_domain(company_name: str) -> Optional[str]:
     try:
-        resp = requests.get(CLEARBIT_SUGGEST_URL, params={"query": company_name},
-                             headers=HEADERS, timeout=10)
+        resp = get_with_retry(CLEARBIT_SUGGEST_URL, params={"query": company_name})
         resp.raise_for_status()
         results = resp.json()
     except Exception:  # noqa: BLE001
@@ -59,17 +74,17 @@ def fetch_via_wikidata(company_name: str) -> Optional[str]:
     """Look up the company's Wikidata entity, read its P154 (logo image)
     claim if set, and resolve that Commons file to a raster thumbnail URL."""
     try:
-        resp = requests.get(WIKIDATA_SEARCH_URL, params={
+        resp = get_with_retry(WIKIDATA_SEARCH_URL, params={
             "action": "wbsearchentities", "search": company_name,
             "language": "en", "format": "json", "type": "item", "limit": 1,
-        }, headers=HEADERS, timeout=10)
+        })
         resp.raise_for_status()
         matches = resp.json().get("search", [])
         if not matches:
             return None
         qid = matches[0]["id"]
 
-        resp = requests.get(WIKIDATA_ENTITY_URL.format(qid=qid), headers=HEADERS, timeout=10)
+        resp = get_with_retry(WIKIDATA_ENTITY_URL.format(qid=qid))
         resp.raise_for_status()
         claims = resp.json()["entities"][qid].get("claims", {})
         logo_claim = claims.get("P154")
@@ -77,10 +92,10 @@ def fetch_via_wikidata(company_name: str) -> Optional[str]:
             return None
         commons_filename = logo_claim[0]["mainsnak"]["datavalue"]["value"]
 
-        resp = requests.get(COMMONS_API_URL, params={
+        resp = get_with_retry(COMMONS_API_URL, params={
             "action": "query", "titles": f"File:{commons_filename}",
             "prop": "imageinfo", "iiprop": "url", "iiurlwidth": 800, "format": "json",
-        }, headers=HEADERS, timeout=10)
+        })
         resp.raise_for_status()
         pages = resp.json().get("query", {}).get("pages", {})
         for page in pages.values():
@@ -94,10 +109,10 @@ def fetch_via_wikidata(company_name: str) -> Optional[str]:
 
 def fetch_via_wikipedia_thumbnail(company_name: str) -> Optional[str]:
     try:
-        resp = requests.get(WIKIPEDIA_API_URL, params={
+        resp = get_with_retry(WIKIPEDIA_API_URL, params={
             "action": "query", "titles": company_name, "prop": "pageimages",
             "format": "json", "pithumbsize": 500,
-        }, headers=HEADERS, timeout=10)
+        })
         resp.raise_for_status()
         pages = resp.json().get("query", {}).get("pages", {})
         for page in pages.values():
@@ -125,7 +140,7 @@ def guess_extension(url: str) -> str:
 
 def download_image(url: str, dest_path: Path) -> bool:
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
+        resp = get_with_retry(url, timeout=15)
         resp.raise_for_status()
         if len(resp.content) < 200:  # suspiciously small - likely a broken placeholder
             return False
@@ -197,7 +212,7 @@ def main():
         else:
             print(f"  FAILED  {company_name} (no logo found via any method)")
             failed_names.append(company_name)
-        time.sleep(0.2)  # be polite to the free APIs
+        time.sleep(0.5)  # be polite to the free APIs
 
     if succeeded_rows:
         update_companies_csv(args.csv, succeeded_rows)

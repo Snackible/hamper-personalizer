@@ -75,8 +75,13 @@ def fit_and_center(logo: Image.Image, box_w: int, box_h: int, padding: int,
     target_w = max(box_w - 2 * padding, 1)
     target_h = max(box_h - 2 * padding, 1)
 
-    resized = logo.copy()
-    resized.thumbnail((target_w, target_h), Image.LANCZOS)
+    # Scale to fill the target box (up OR down) preserving aspect ratio.
+    # Image.thumbnail() only ever shrinks, never enlarges - a small source
+    # logo (e.g. a 250px-wide Wikipedia thumbnail) would otherwise stay
+    # tiny inside a much bigger box instead of filling it.
+    scale = min(target_w / logo.width, target_h / logo.height)
+    new_size = (max(round(logo.width * scale), 1), max(round(logo.height * scale), 1))
+    resized = logo.resize(new_size, Image.LANCZOS)
 
     if rotation_degrees:
         # PIL rotates counter-clockwise for positive angles; our convention
