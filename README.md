@@ -84,7 +84,7 @@ python hamper_personalizer.py \
 ```
 
 All flags are optional and default to the paths in `config.py`. Each row in
-`companies.csv` produces `output/<sanitized_company_name>.pdf`. For each
+`companies.csv` produces `output/<sanitized_company_name>.jpg`. For each
 logo the engine: trims surrounding whitespace/transparency, resizes it to
 fit `LOGO_BOX` while preserving aspect ratio, rotates it to match the box's
 tilt if any, and centers it in the box by visual weight (not just bounding

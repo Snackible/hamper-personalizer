@@ -143,12 +143,12 @@ def process_row(args: tuple) -> JobResult:
     try:
         result_image = build_personalized_image(Path(base_image_path), logo_path, box, padding,
                                                   rotation_degrees)
-        output_path = Path(output_dir) / f"{sanitize_filename(company_name)}.pdf"
+        output_path = Path(output_dir) / f"{sanitize_filename(company_name)}.jpg"
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
         if result_image.mode == "RGBA":
             result_image = result_image.convert("RGB")
-        result_image.save(output_path, format="PDF")
+        result_image.save(output_path, format="JPEG", quality=92)
 
         return JobResult(company_name, logo_filename, str(output_path), True)
     except Exception as exc:  # noqa: BLE001 - surfaced in the batch summary
